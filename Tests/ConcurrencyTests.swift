@@ -42,6 +42,36 @@ final class DataRequestConcurrencyTests: BaseTestCase {
         XCTAssertNotNil(value)
     }
 
+    func testThatDataTaskCanBeCancelledConcurrently() async {
+        // Tests fix for https://github.com/Alamofire/Alamofire/issues/3978
+        // Given
+        let session = Session()
+
+        // When: a single request has multiple DataTasks attached.
+        for _ in 0..<100 {
+            let request = session.request(.get)
+            let first = Task {
+                await request
+                    .serializingDecodable(TestResponse.self)
+                    .response
+            }
+            let second = Task {
+                await request
+                    .serializingDecodable(TestResponse.self)
+                    .response
+            }
+
+            async let firstResponse = first.value
+            async let secondResponse = second.value
+            // When: both tasks are cancelled concurrently.
+            async let firstCancel: Void = Task { @Sendable in first.cancel() }.value
+            async let secondCancel: Void = Task { @Sendable in second.cancel() }.value
+
+            // Then: all awaits parts should complete without continuation misuse.
+            _ = await (firstResponse, secondResponse, firstCancel, secondCancel)
+        }
+    }
+
     func testThat500ResponseCanBeRetried() async throws {
         // Given
         let session = stored(Session())
@@ -764,7 +794,7 @@ final class UploadConcurrencyTests: BaseTestCase {
 
 @available(macOS 10.15, iOS 13, tvOS 13, watchOS 6, *)
 final class WebSocketConcurrencyTests: BaseTestCase {
-    func testThatMessageEventsCanBeStreamed() async throws {
+    func testThatMessageEventsCanBeStreamed() async {
         // Given
         let session = stored(Session())
         let receivedEvent = expectation(description: "receivedEvent")
@@ -780,7 +810,7 @@ final class WebSocketConcurrencyTests: BaseTestCase {
         // Then
     }
 
-    func testThatMessagesCanBeStreamed() async throws {
+    func testThatMessagesCanBeStreamed() async {
         // Given
         let session = stored(Session())
 
